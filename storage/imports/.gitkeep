@@ -1,0 +1,13 @@
+# Dossier des fichiers d'import
+
+Placez vos fichiers texte (.txt, .csv, .dat, .tsv) ici pour les importer avec la commande:
+
+```bash
+php artisan tableau:import
+```
+
+ou spécifiez un autre dossier:
+
+```bash
+php artisan tableau:import /chemin/vers/mes/fichiers
+```
