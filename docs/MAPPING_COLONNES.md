@@ -33,7 +33,6 @@ Insère une valeur constante pour toutes les lignes.
 'devise' => ['value' => 'EUR'],
 'flag_actif' => ['value' => 1],
 'flag_inactif' => ['value' => 0],
-'created_at' => ['value' => now()],
 ```
 
 **Cas d'usage** :
@@ -88,6 +87,41 @@ Insère le nom du fichier en cours de traitement.
 - Audit et traçabilité
 - Debugging
 
+### 5. Valeur Dynamique (`special`)
+
+Insère une valeur calculée dynamiquement au moment de l'import.
+
+```php
+'import_date' => ['special' => 'today'],        // Date du jour (sans heure)
+'import_datetime' => ['special' => 'now'],      // Date et heure actuelles
+'import_year' => ['special' => 'year'],         // Année actuelle (2026)
+'processed_by' => ['special' => 'user'],        // Utilisateur système
+'server_name' => ['special' => 'hostname'],     // Nom de la machine
+```
+
+**Mots-clés disponibles** :
+
+| Mot-clé | Description | Exemple de valeur |
+|---------|-------------|-------------------|
+| `now` | Date et heure actuelles (Carbon) | `2026-03-09 14:30:45` |
+| `today` | Date du jour (Carbon) | `2026-03-09 00:00:00` |
+| `year` | Année actuelle | `2026` |
+| `month` | Mois actuel | `03` |
+| `day` | Jour actuel | `09` |
+| `date` | Date formatée Y-m-d | `2026-03-09` |
+| `datetime` | Date/heure formatée | `2026-03-09 14:30:45` |
+| `time` | Heure actuelle H:i:s | `14:30:45` |
+| `timestamp` | Unix timestamp | `1741529445` |
+| `user` | Utilisateur système | `www-data` ou `root` |
+| `hostname` | Nom de la machine | `server-prod-01` |
+| `php_version` | Version de PHP | `8.3.0` |
+
+**Cas d'usage** :
+- Horodatage des imports
+- Traçabilité (qui/quand/où)
+- Versioning
+- Partitionnement par date/année
+
 ## Exemple Complet : 85 Colonnes
 
 Scénario : Table de 85 colonnes
@@ -113,6 +147,10 @@ Scénario : Table de 85 colonnes
         // Colonnes 84-85 : Valeurs fixes
         'flag_1' => ['value' => 0],
         'flag_2' => ['value' => 0],
+        
+        // Colonnes bonus : Valeurs dynamiques (optionnel)
+        'import_date' => ['special' => 'today'],
+        'processed_by' => ['special' => 'user'],
     ],
 ],
 ```
@@ -186,7 +224,13 @@ Format invalide (colonne index 81 requise, 80 colonnes trouvées)
 // ❌ Incorrect
 'flag' => 0,
 
-// ✅ Correct
+// ✅ CoMot-clé spécial invalide
+```
+Mot-clé spécial 'invalide' non reconnu, null inséré
+```
+**Solution** : Utilisez uniquement les mots-clés documentés (now, today, year, etc.)
+
+### 4. rrect
 'flag' => ['value' => 0],
 ```
 
@@ -222,16 +266,18 @@ Configuration :
         'Type' => ['file_type' => true],          // 'OPERATIONS'
         'reference' => ['file_index' => 0],       // 'REF001'
         'date_operation' => ['file_index' => 1],  // '2024-01-15'
-        'libelle' => ['file_index' => 2],         // 'Achat'
-        'montant' => ['file_index' => 3],         // 1250.50
-        'devise' => ['file_index' => 4],          // 'EUR'
-        // ... 75 autres colonnes
-        'col_80' => ['file_index' => 79],
-        'flag_imported' => ['value' => 1],
-        'imported_at' => ['value' => now()],
+        'libell_date' => ['special' => 'today'],
+        'import_year' => ['special' => 'year'],
+        'processed_by' => ['special' => 'user'],
     ],
 ],
 ```
+
+Résultat en base :
+```
+| Type       | reference | date_operation | libelle | montant | ... | flag_imported | import_date | import_year | processed_by |
+|------------|-----------|----------------|---------|---------|-----|---------------|-------------|-------------|--------------|
+| OPERATIONS | REF001    | 2024-01-15     | Achat   | 1250.50 | ... | 1             | 2026-03-09  | 2026        | www-data 
 
 Résultat en base :
 ```

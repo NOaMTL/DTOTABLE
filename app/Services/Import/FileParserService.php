@@ -52,6 +52,9 @@ class FileParserService
                 } elseif (isset($config['file_name']) && $config['file_name']) {
                     // Nom du fichier
                     $value = $fileName;
+                } elseif (isset($config['special'])) {
+                    // Valeur dynamique (mots-clés spéciaux)
+                    $value = $this->resolveSpecialValue($config['special']);
                 } else {
                     $value = '';
                 }
@@ -121,6 +124,28 @@ class FileParserService
         }
 
         return (float) $amount;
+    }
+
+    /**
+     * Résoudre une valeur spéciale (mot-clé dynamique)
+     */
+    private function resolveSpecialValue(string $keyword): mixed
+    {
+        return match($keyword) {
+            'now' => now(),                          // Date et heure actuelles
+            'today' => today(),                      // Date du jour (sans heure)
+            'year' => date('Y'),                     // Année actuelle
+            'month' => date('m'),                    // Mois actuel
+            'day' => date('d'),                      // Jour actuel
+            'date' => date('Y-m-d'),                 // Date formatée
+            'datetime' => date('Y-m-d H:i:s'),       // Date/heure formatée
+            'time' => date('H:i:s'),                 // Heure actuelle
+            'timestamp' => time(),                   // Unix timestamp
+            'user' => get_current_user(),            // Utilisateur système
+            'hostname' => gethostname(),             // Nom de la machine
+            'php_version' => PHP_VERSION,            // Version PHP
+            default => null,                         // Mot-clé inconnu
+        };
     }
 
     /**

@@ -37,6 +37,7 @@ return [
      * 'nom_colonne' => ['file_index' => 0]                   // Index dans le fichier (0-based)
      * 'nom_colonne' => ['file_type' => true]                 // Type du fichier (ex: 'OPERATIONS')
      * 'nom_colonne' => ['file_name' => true]                 // Nom du fichier
+     * 'nom_colonne' => ['special' => 'today']                // Valeur dynamique (date, user, etc.)
      */
     'column_mapping' => [
         'client_commercial' => [
@@ -130,6 +131,13 @@ return [
             // Colonnes 84-85 : Valeurs fixes
             'flag_1' => ['value' => 0],
             'flag_2' => ['value' => 0],
+            
+            // Exemples de valeurs dynamiques (optionnel)
+            'import_date' => ['special' => 'today'],        // Date du jour
+            'import_datetime' => ['special' => 'now'],      // Date/heure actuelle
+            'import_year' => ['special' => 'year'],         // Année actuelle
+            'processed_by' => ['special' => 'user'],        // Utilisateur système
+            'server_name' => ['special' => 'hostname'],     // Nom du serveur
         ],
 
         'partenaire' => [

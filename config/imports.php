@@ -45,6 +45,11 @@ return [
     |   'nom_colonne' => ['file_index' => 0]                   // Colonne 0 du fichier
     |   'nom_colonne' => ['file_type' => true]                 // Type du fichier
     |   'nom_colonne' => ['file_name' => true]                 // Nom du fichier
+    |   'nom_colonne' => ['special' => 'today']                // Valeur dynamique
+    |
+    | Mots-clés spéciaux disponibles:
+    |   'now', 'today', 'year', 'month', 'day', 'date', 'datetime', 'time',
+    |   'timestamp', 'user', 'hostname', 'php_version'
     |
     */
     'column_mapping' => [

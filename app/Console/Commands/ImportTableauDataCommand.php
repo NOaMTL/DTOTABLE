@@ -11,7 +11,6 @@ class ImportTableauDataCommand extends Command
 {
     protected $signature = 'tableau:import 
                             {type : Type d\'import (ClientCommercial ou Partenaire)}
-                            {--remote-path= : Chemin distant de base pour QDD} 
                             {--chunk-size=1000 : Nombre de lignes par batch}
                             {--truncate : Vider la table avant import}
                             {--drop-indexes : Supprimer les indexes pendant import (plus rapide)}
@@ -84,19 +83,11 @@ class ImportTableauDataCommand extends Command
         }
 
         $this->info("📋 Fichiers attendus: " . count($expectedFiles));
-        $remotePath = $this->option('remote-path') ?? '';
+        $remotePath = config('imports.qdd.remote_base_path', '');
         if ($remotePath) {
             $this->info("🌐 Chemin distant: {$remotePath}");
         }
         $this->newLine();
-
-        // Confirmation si truncate
-        if ($this->option('truncate')) {
-            if (!$this->confirm("⚠️  Voulez-vous vraiment SUPPRIMER toutes les données existantes de la table {$this->tableName} ?", false)) {
-                $this->warn('Import annulé.');
-                return self::SUCCESS;
-            }
-        }
 
         // Optimisations de performance
         $this->optimizePerformance();
@@ -884,7 +875,6 @@ class ImportTableauDataCommand extends Command
                     'truncate' => $this->option('truncate'),
                     'drop_indexes' => $this->option('drop-indexes'),
                     'keep_files' => $this->option('keep-files'),
-                    'remote_path' => $this->option('remote-path'),
                     'executed_at' => now()->toDateTimeString(),
                     'user' => get_current_user(),
                     'php_version' => PHP_VERSION,
