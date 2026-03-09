@@ -29,30 +29,47 @@ class ImportConfigService
      */
     public function getColumnMapping(string $type): array
     {
-        return match($type) {
-            'ClientCommercial' => [
-                0 => 'reference',
-                1 => 'date_operation',
-                2 => 'libelle',
-                3 => 'montant',
-                4 => 'devise',
-                5 => 'compte',
-                6 => 'agence',
-                7 => 'type_operation',
-                8 => 'statut',
-            ],
-            'Partenaire' => [
-                0 => 'code_partenaire',
-                1 => 'date_transaction',
-                2 => 'description',
-                3 => 'montant_ht',
-                4 => 'montant_ttc',
-                5 => 'taux_tva',
-                6 => 'devise',
-                7 => 'statut',
-            ],
-            default => [],
-        };
+        // Récupérer le mapping depuis la config
+        $importTypeKey = $this->getImportTypeKey($type);
+        $mapping = config("imports.column_mapping.{$importTypeKey}");
+        
+        if (!$mapping) {
+            // Fallback sur l'ancien format si pas de config
+            return match($type) {
+                'ClientCommercial' => [
+                    0 => 'reference',
+                    1 => 'date_operation',
+                    2 => 'libelle',
+                    3 => 'montant',
+                    4 => 'devise',
+                    5 => 'compte',
+                    6 => 'agence',
+                    7 => 'type_operation',
+                    8 => 'statut',
+                ],
+                'Partenaire' => [
+                    0 => 'code_partenaire',
+                    1 => 'date_transaction',
+                    2 => 'description',
+                    3 => 'montant_ht',
+                    4 => 'montant_ttc',
+                    5 => 'taux_tva',
+                    6 => 'devise',
+                    7 => 'statut',
+                ],
+                default => [],
+            };
+        }
+        
+        return $mapping;
+    }
+
+    /**
+     * Convertir le type d'import en clé de config
+     */
+    private function getImportTypeKey(string $importType): string
+    {
+        return $importType === 'ClientCommercial' ? 'client_commercial' : 'partenaire';
     }
 
     /**

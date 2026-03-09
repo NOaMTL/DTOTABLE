@@ -8,40 +8,69 @@ class FileParserService
 {
     /**
      * Parser une ligne selon le mapping défini
+     *
+     * @param string $line Ligne du fichier texte
+     * @param string $fileType Type du fichier (ex: 'OPERATIONS')
+     * @param array $mapping Mapping des colonnes avec format:
+     *   ['col' => ['value' => 'fixe'], 'col2' => ['file_index' => 0], 'col3' => ['file_type' => true]]
+     * @param string $importType Type d'import (ClientCommercial/Partenaire)
+     * @param string $fileName Nom du fichier (optionnel)
      */
-    public function parseLine(string $line, string $fileType, array $mapping, string $importType): array
+    public function parseLine(string $line, string $fileType, array $mapping, string $importType, string $fileName = ''): array
     {
         // Le délimiteur est toujours \t (tabulation)
         $fields = explode("\t", $line);
 
-        $minColumns = count($mapping);
-        if (count($fields) < $minColumns) {
-            throw new Exception("Format invalide (minimum {$minColumns} colonnes requises, " . count($fields) . " trouvées)");
+        // Compter combien de colonnes du fichier sont nécessaires
+        $maxFileIndex = -1;
+        foreach ($mapping as $columnName => $config) {
+            if (is_array($config) && isset($config['file_index'])) {
+                $maxFileIndex = max($maxFileIndex, $config['file_index']);
+            }
+        }
+        
+        if ($maxFileIndex >= 0 && count($fields) <= $maxFileIndex) {
+            throw new Exception("Format invalide (colonne index {$maxFileIndex} requise, " . count($fields) . " colonnes trouvées)");
         }
 
         // Mapper les champs selon le mapping défini
         $data = [];
-        foreach ($mapping as $index => $columnName) {
-            $value = $fields[$index] ?? '';
+        foreach ($mapping as $columnName => $config) {
+            $value = null;
             
-            // Traitement spécifique selon le nom de colonne
-            if (str_contains($columnName, 'date')) {
+            // Déterminer la source de la valeur
+            if (is_array($config)) {
+                if (isset($config['value'])) {
+                    // Valeur fixe
+                    $value = $config['value'];
+                } elseif (isset($config['file_index'])) {
+                    // Valeur depuis le fichier
+                    $value = $fields[$config['file_index']] ?? '';
+                } elseif (isset($config['file_type']) && $config['file_type']) {
+                    // Type du fichier
+                    $value = $fileType;
+                } elseif (isset($config['file_name']) && $config['file_name']) {
+                    // Nom du fichier
+                    $value = $fileName;
+                } else {
+                    $value = '';
+                }
+            } else {
+                // Ancien format : config est directement un index
+                $value = $fields[$config] ?? '';
+            }
+            
+            // Traitement spécifique selon le nom de colonne ou le type de valeur
+            if (isset($config['value'])) {
+                // Valeur fixe : pas de traitement
+                $data[$columnName] = $value;
+            } elseif (str_contains($columnName, 'date')) {
                 $data[$columnName] = !empty(trim($value)) ? $this->parseDate($value) : null;
             } elseif (str_contains($columnName, 'montant') || str_contains($columnName, 'taux')) {
                 $data[$columnName] = !empty(trim($value)) ? $this->parseAmount($value) : 0;
             } else {
                 $data[$columnName] = trim($value);
             }
-        }
-        
-        // Valeurs par défaut selon le type
-        if ($importType === 'ClientCommercial') {
-            $data['devise'] = $data['devise'] ?? 'EUR';
-            $data['type_operation'] = $data['type_operation'] ?? $fileType;
-            $data['statut'] = $data['statut'] ?? 'completed';
-        } elseif ($importType === 'Partenaire') {
-            $data['devise'] = $data['devise'] ?? 'EUR';
-            $data['statut'] = $data['statut'] ?? 'active';
         }
 
         return $data;
@@ -110,9 +139,16 @@ class FileParserService
                 && isset($data['montant_ttc']);
         }
         
-        // Validation générique : vérifier que les premières colonnes obligatoires existent
-        $firstThreeColumns = array_slice($mapping, 0, 3);
-        foreach ($firstThreeColumns as $column) {
+        // Validation générique : vérifier que les 3 premières colonnes issues du fichier existent
+        $fileColumns = [];
+        foreach ($mapping as $columnName => $config) {
+            if (is_array($config) && isset($config['file_index'])) {
+                $fileColumns[] = $columnName;
+                if (count($fileColumns) >= 3) break;
+            }
+        }
+        
+        foreach ($fileColumns as $column) {
             if (!isset($data[$column]) || (is_string($data[$column]) && empty($data[$column]))) {
                 return false;
             }

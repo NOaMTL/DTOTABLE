@@ -148,12 +148,13 @@ class ImportTableauDataRefactoredCommand extends Command
         // Restaurer les paramètres DB
         $this->insertService->restorePerformance();
 
-        // Nettoyer les fichiers
-        if (!$this->option('keep-files')) {
-            $this->newLine();
-            $this->info('🗑️  Nettoyage des fichiers téléchargés...');
-            $deleted = $this->downloadService->cleanup($this->tempDir);
-            $this->line("  ✅ {$deleted} fichier(s) supprimé(s)");
+        // Nettoyer le dossier temporaire (les fichiers ont déjà été supprimés individuellement)
+        if (!$this->option('keep-files') && File::isDirectory($this->tempDir)) {
+            if (count(File::files($this->tempDir)) === 0) {
+                File::deleteDirectory($this->tempDir);
+                $this->newLine();
+                $this->info('🗑️  Dossier temporaire nettoyé');
+            }
         }
 
         // Afficher le résumé
@@ -216,6 +217,13 @@ class ImportTableauDataRefactoredCommand extends Command
 
         // Traiter le fichier
         $this->processLocalFile($localFile, $fileName, $fileType, $tableName, $columnMapping, $importType);
+        
+        // Supprimer le fichier immédiatement après traitement (optimisation K8s)
+        if (!$this->option('keep-files')) {
+            if ($this->downloadService->deleteFile($localFile)) {
+                $this->line("  🗑️  Fichier supprimé");
+            }
+        }
     }
 
     private function processLocalFile(
@@ -253,7 +261,7 @@ class ImportTableauDataRefactoredCommand extends Command
                 }
 
                 try {
-                    $parsed = $this->parserService->parseLine($line, $fileType, $columnMapping, $importType);
+                    $parsed = $this->parserService->parseLine($line, $fileType, $columnMapping, $importType, $fileName);
                     
                     if ($this->parserService->validateData($parsed, $columnMapping, $importType)) {
                         $batch[] = $parsed;

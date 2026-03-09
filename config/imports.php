@@ -36,6 +36,39 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Mapping des colonnes
+    |--------------------------------------------------------------------------
+    |
+    | Définir le mapping entre les colonnes de la table et les données.
+    | Format:
+    |   'nom_colonne' => ['value' => 'valeur_fixe']           // Valeur fixe
+    |   'nom_colonne' => ['file_index' => 0]                   // Colonne 0 du fichier
+    |   'nom_colonne' => ['file_type' => true]                 // Type du fichier
+    |   'nom_colonne' => ['file_name' => true]                 // Nom du fichier
+    |
+    */
+    'column_mapping' => [
+        'client_commercial' => [
+            // Exemple : 85 colonnes dont 82 du fichier
+            'Type' => ['file_type' => true],                    // Type du fichier (ex: 'OPERATIONS')
+            'col_1' => ['file_index' => 0],                     // 1ère colonne du fichier
+            'col_2' => ['file_index' => 1],                     // 2ème colonne du fichier
+            'col_3' => ['file_index' => 2],
+            // ... 79 autres colonnes du fichier (index 3-81)
+            'col_83' => ['value' => 0],                         // Valeur fixe 0
+            'col_84' => ['value' => 0],                         // Valeur fixe 0
+            'col_85' => ['value' => 'EUR'],                     // Valeur fixe 'EUR'
+        ],
+        'partenaire' => [
+            'Type' => ['file_type' => true],
+            'col_1' => ['file_index' => 0],
+            'col_2' => ['file_index' => 1],
+            // ... autres colonnes
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Paramètres de performance
     |--------------------------------------------------------------------------
     */

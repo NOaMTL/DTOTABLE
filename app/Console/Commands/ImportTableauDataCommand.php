@@ -133,9 +133,9 @@ class ImportTableauDataCommand extends Command
         // Restaurer les paramètres DB
         $this->restorePerformance();
 
-        // Nettoyer les fichiers téléchargés
+        // Nettoyer le dossier temporaire (les fichiers ont déjà été supprimés individuellement)
         if (!$this->option('keep-files')) {
-            $this->cleanupFiles();
+            $this->cleanupTempDirectory();
         }
 
         // Afficher le résumé
@@ -262,6 +262,18 @@ class ImportTableauDataCommand extends Command
 
         // Traiter le fichier
         $this->processLocalFile($localFile, $fileName, $fileType);
+        
+        // Supprimer le fichier immédiatement après traitement (optimisation K8s)
+        if (!$this->option('keep-files')) {
+            if (file_exists($localFile)) {
+                try {
+                    unlink($localFile);
+                    $this->line("  🗑️  Fichier supprimé");
+                } catch (Exception $e) {
+                    // Ignorer les erreurs
+                }
+            }
+        }
     }
 
     private function processLocalFile(string $filePath, string $fileName, string $fileType): void
@@ -304,7 +316,7 @@ class ImportTableauDataCommand extends Command
                 }
 
                 try {
-                    $parsed = $this->parseLine($line, $fileType, $this->columnMapping);
+                    $parsed = $this->parseLine($line, $fileType, $this->columnMapping, $fileName);
                     
                     if ($this->validateData($parsed, $this->columnMapping)) {
                         $batch[] = $parsed;
@@ -369,57 +381,145 @@ class ImportTableauDataCommand extends Command
         }
 
         try {
-            // Bulk insert avec transaction
-            DB::transaction(function () use ($batch) {
-                // Ajouter les timestamps
-                $now = now();
-                $batch = array_map(function ($item) use ($now) {
-                    $item['created_at'] = $now;
-                    $item['updated_at'] = $now;
-                    return $item;
-                }, $batch);
+            // Ajouter les timestamps
+            $now = now();
+            $batch = array_map(function ($item) use ($now) {
+                $item['created_at'] = $now;
+                $item['updated_at'] = $now;
+                return $item;
+            }, $batch);
 
-                // Un seul INSERT pour tout le batch
-                DB::table($this->tableName)->insert($batch);
-            });
+            // Utiliser une méthode différente selon le driver
+            if (DB::getDriverName() === 'sqlsrv') {
+                $this->insertBatchSqlServer($batch);
+            } else {
+                DB::transaction(function () use ($batch) {
+                    DB::table($this->tableName)->insert($batch);
+                });
+            }
         } catch (Exception $e) {
             $this->error("Erreur lors de l'insertion batch: {$e->getMessage()}");
         }
     }
 
-    private function parseLine(string $line, string $fileType, array $mapping): array
+    /**
+     * Insert optimisé pour SQL Server (contourne la limite des 2100 paramètres)
+     */
+    private function insertBatchSqlServer(array $batch): void
+    {
+        // Diviser en sous-batchs de 250 lignes
+        $chunks = array_chunk($batch, 250);
+        
+        DB::transaction(function () use ($chunks) {
+            foreach ($chunks as $chunk) {
+                $this->insertChunkWithLiterals($chunk);
+            }
+        });
+    }
+
+    /**
+     * Construire et exécuter un INSERT avec des valeurs littérales
+     */
+    private function insertChunkWithLiterals(array $rows): void
+    {
+        if (empty($rows)) {
+            return;
+        }
+
+        $columns = array_keys($rows[0]);
+        $columnList = implode(', ', array_map(fn($col) => "[$col]", $columns));
+
+        $valuesList = [];
+        foreach ($rows as $row) {
+            $values = [];
+            foreach ($columns as $column) {
+                $value = $row[$column];
+                $values[] = $this->formatValueForSql($value);
+            }
+            $valuesList[] = '(' . implode(', ', $values) . ')';
+        }
+
+        $sql = "INSERT INTO [{$this->tableName}] ({$columnList}) VALUES " . implode(', ', $valuesList);
+        DB::statement($sql);
+    }
+
+    /**
+     * Formater une valeur pour l'insertion SQL
+     */
+    private function formatValueForSql($value): string
+    {
+        if (is_null($value)) {
+            return 'NULL';
+        }
+
+        if (is_bool($value)) {
+            return $value ? '1' : '0';
+        }
+
+        if (is_numeric($value)) {
+            return (string) $value;
+        }
+
+        // Échapper les chaînes de caractères
+        $escaped = str_replace("'", "''", (string) $value);
+        return "N'{$escaped}'";
+    }
+
+    private function parseLine(string $line, string $fileType, array $mapping, string $fileName = ''): array
     {
         // Le délimiteur est toujours \t (tabulation)
         $fields = explode("\t", $line);
 
-        $minColumns = count($mapping);
-        if (count($fields) < $minColumns) {
-            throw new Exception("Format invalide (minimum {$minColumns} colonnes requises, " . count($fields) . " trouvées)");
+        // Compter combien de colonnes du fichier sont nécessaires
+        $maxFileIndex = -1;
+        foreach ($mapping as $columnName => $config) {
+            if (is_array($config) && isset($config['file_index'])) {
+                $maxFileIndex = max($maxFileIndex, $config['file_index']);
+            }
+        }
+        
+        if ($maxFileIndex >= 0 && count($fields) <= $maxFileIndex) {
+            throw new Exception("Format invalide (colonne index {$maxFileIndex} requise, " . count($fields) . " colonnes trouvées)");
         }
 
         // Mapper les champs selon le mapping défini
         $data = [];
-        foreach ($mapping as $index => $columnName) {
-            $value = $fields[$index] ?? '';
+        foreach ($mapping as $columnName => $config) {
+            $value = null;
             
-            // Traitement spécifique selon le nom de colonne
-            if (str_contains($columnName, 'date')) {
+            // Déterminer la source de la valeur
+            if (is_array($config)) {
+                if (isset($config['value'])) {
+                    // Valeur fixe
+                    $value = $config['value'];
+                } elseif (isset($config['file_index'])) {
+                    // Valeur depuis le fichier
+                    $value = $fields[$config['file_index']] ?? '';
+                } elseif (isset($config['file_type']) && $config['file_type']) {
+                    // Type du fichier
+                    $value = $fileType;
+                } elseif (isset($config['file_name']) && $config['file_name']) {
+                    // Nom du fichier
+                    $value = $fileName;
+                } else {
+                    $value = '';
+                }
+            } else {
+                // Ancien format : config est directement un index
+                $value = $fields[$config] ?? '';
+            }
+            
+            // Traitement spécifique selon le nom de colonne ou le type de valeur
+            if (isset($config['value'])) {
+                // Valeur fixe : pas de traitement
+                $data[$columnName] = $value;
+            } elseif (str_contains($columnName, 'date')) {
                 $data[$columnName] = !empty(trim($value)) ? $this->parseDate($value) : null;
             } elseif (str_contains($columnName, 'montant') || str_contains($columnName, 'taux')) {
                 $data[$columnName] = !empty(trim($value)) ? $this->parseAmount($value) : 0;
             } else {
                 $data[$columnName] = trim($value);
             }
-        }
-        
-        // Valeurs par défaut selon le type
-        if ($this->importType === 'ClientCommercial') {
-            $data['devise'] = $data['devise'] ?? 'EUR';
-            $data['type_operation'] = $data['type_operation'] ?? $fileType;
-            $data['statut'] = $data['statut'] ?? 'completed';
-        } elseif ($this->importType === 'Partenaire') {
-            $data['devise'] = $data['devise'] ?? 'EUR';
-            $data['statut'] = $data['statut'] ?? 'active';
         }
 
         return $data;
@@ -650,6 +750,16 @@ class ImportTableauDataCommand extends Command
         // Supprimer le dossier temporaire s'il est vide
         if (File::isDirectory($this->tempDir) && count(File::files($this->tempDir)) === 0) {
             File::deleteDirectory($this->tempDir);
+        }
+    }
+
+    private function cleanupTempDirectory(): void
+    {
+        // Nettoyer uniquement le dossier si vide (les fichiers ont déjà été supprimés)
+        if (File::isDirectory($this->tempDir) && count(File::files($this->tempDir)) === 0) {
+            File::deleteDirectory($this->tempDir);
+            $this->newLine();
+            $this->info('🗑️  Dossier temporaire nettoyé');
         }
     }
 

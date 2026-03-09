@@ -67,6 +67,23 @@ class QddDownloadService
         return $deleted;
     }
 
+    /**
+     * Supprimer un fichier immédiatement après traitement
+     */
+    public function deleteFile(string $filePath): bool
+    {
+        if (file_exists($filePath)) {
+            try {
+                unlink($filePath);
+                return true;
+            } catch (Exception $e) {
+                return false;
+            }
+        }
+        
+        return false;
+    }
+
     public function getDownloadedFiles(): array
     {
         return $this->downloadedFiles;
