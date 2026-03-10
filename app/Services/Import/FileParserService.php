@@ -6,6 +6,9 @@ use Exception;
 
 class FileParserService
 {
+    private array $dateColumnsCache = [];
+    private array $amountColumnsCache = [];
+    
     /**
      * Parser une ligne selon le mapping défini
      *
@@ -20,6 +23,12 @@ class FileParserService
     {
         // Le délimiteur est toujours \t (tabulation)
         $fields = explode("\t", $line);
+
+        // Précompiler les colonnes nécessitant un traitement spécial (1 seule fois)
+        $cacheKey = md5(serialize(array_keys($mapping)));
+        if (!isset($this->dateColumnsCache[$cacheKey])) {
+            $this->precompileMappingTypes($mapping, $cacheKey);
+        }
 
         // Compter combien de colonnes du fichier sont nécessaires
         $maxFileIndex = -1;
@@ -41,8 +50,9 @@ class FileParserService
             // Déterminer la source de la valeur
             if (is_array($config)) {
                 if (isset($config['value'])) {
-                    // Valeur fixe
-                    $value = $config['value'];
+                    // Valeur fixe : pas de traitement
+                    $data[$columnName] = $config['value'];
+                    continue;
                 } elseif (isset($config['file_index'])) {
                     // Valeur depuis le fichier
                     $value = $fields[$config['file_index']] ?? '';
@@ -54,7 +64,8 @@ class FileParserService
                     $value = $fileName;
                 } elseif (isset($config['special'])) {
                     // Valeur dynamique (mots-clés spéciaux)
-                    $value = $this->resolveSpecialValue($config['special']);
+                    $data[$columnName] = $this->resolveSpecialValue($config['special']);
+                    continue;
                 } else {
                     $value = '';
                 }
@@ -63,13 +74,10 @@ class FileParserService
                 $value = $fields[$config] ?? '';
             }
             
-            // Traitement spécifique selon le nom de colonne ou le type de valeur
-            if (isset($config['value'])) {
-                // Valeur fixe : pas de traitement
-                $data[$columnName] = $value;
-            } elseif (str_contains($columnName, 'date')) {
+            // Traitement spécifique selon le type de colonne (précompilé)
+            if (isset($this->dateColumnsCache[$cacheKey][$columnName])) {
                 $data[$columnName] = !empty(trim($value)) ? $this->parseDate($value) : null;
-            } elseif (str_contains($columnName, 'montant') || str_contains($columnName, 'taux')) {
+            } elseif (isset($this->amountColumnsCache[$cacheKey][$columnName])) {
                 $data[$columnName] = !empty(trim($value)) ? $this->parseAmount($value) : 0;
             } else {
                 $data[$columnName] = trim($value);
@@ -77,6 +85,28 @@ class FileParserService
         }
 
         return $data;
+    }
+
+    /**
+     * Précompiler les types de colonnes pour éviter str_contains répétés
+     */
+    private function precompileMappingTypes(array $mapping, string $cacheKey): void
+    {
+        $this->dateColumnsCache[$cacheKey] = [];
+        $this->amountColumnsCache[$cacheKey] = [];
+        
+        foreach ($mapping as $columnName => $config) {
+            // Ignorer les valeurs fixes et spéciales
+            if (is_array($config) && (isset($config['value']) || isset($config['special']))) {
+                continue;
+            }
+            
+            if (str_contains($columnName, 'date')) {
+                $this->dateColumnsCache[$cacheKey][$columnName] = true;
+            } elseif (str_contains($columnName, 'montant') || str_contains($columnName, 'taux')) {
+                $this->amountColumnsCache[$cacheKey][$columnName] = true;
+            }
+        }
     }
 
     /**
@@ -132,19 +162,19 @@ class FileParserService
     private function resolveSpecialValue(string $keyword): mixed
     {
         return match($keyword) {
-            'now' => now(),                          // Date et heure actuelles
-            'today' => today(),                      // Date du jour (sans heure)
-            'year' => date('Y'),                     // Année actuelle
-            'month' => date('m'),                    // Mois actuel
-            'day' => date('d'),                      // Jour actuel
-            'date' => date('Y-m-d'),                 // Date formatée
-            'datetime' => date('Y-m-d H:i:s'),       // Date/heure formatée
-            'time' => date('H:i:s'),                 // Heure actuelle
-            'timestamp' => time(),                   // Unix timestamp
-            'user' => get_current_user(),            // Utilisateur système
-            'hostname' => gethostname(),             // Nom de la machine
-            'php_version' => PHP_VERSION,            // Version PHP
-            default => null,                         // Mot-clé inconnu
+            'now' => now()->format('Y-m-d H:i:s'),       // Format datetime string
+            'today' => today()->format('Y-m-d'),         // Format date string
+            'year' => date('Y'),                         // Année actuelle
+            'month' => date('m'),                        // Mois actuel
+            'day' => date('d'),                          // Jour actuel
+            'date' => date('Y-m-d'),                     // Date formatée
+            'datetime' => date('Y-m-d H:i:s'),           // Date/heure formatée
+            'time' => date('H:i:s'),                     // Heure actuelle
+            'timestamp' => time(),                       // Unix timestamp
+            'user' => get_current_user(),                // Utilisateur système
+            'hostname' => gethostname(),                 // Nom de la machine
+            'php_version' => PHP_VERSION,                // Version PHP
+            default => null,                             // Mot-clé inconnu
         };
     }
 
