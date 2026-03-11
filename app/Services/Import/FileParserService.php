@@ -80,7 +80,13 @@ class FileParserService
             } elseif (isset($this->amountColumnsCache[$cacheKey][$columnName])) {
                 $data[$columnName] = !empty(trim($value)) ? $this->parseAmount($value) : 0;
             } else {
-                $data[$columnName] = trim($value);
+                // Nettoyer l'encodage : garder UTF-8 tel quel, sinon tenter conversion
+                $cleaned = trim($value);
+                if (!mb_check_encoding($cleaned, 'UTF-8')) {
+                    // Tenter conversion depuis Windows-1252 (CP1252) vers UTF-8
+                    $cleaned = @iconv('Windows-1252', 'UTF-8//IGNORE', $cleaned) ?: $cleaned;
+                }
+                $data[$columnName] = $cleaned;
             }
         }
 

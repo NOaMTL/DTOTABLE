@@ -269,6 +269,232 @@ class ImapClient
     }
 
     /**
+     * Télécharger toutes les pièces jointes d'un email
+     * 
+     * @param int $emailNumber
+     * @param string $destinationPath Dossier de destination (ex: storage/app/attachments)
+     * @param bool $keepOriginalName Garder le nom original (true) ou générer un nom unique (false)
+     * @return array Liste des fichiers téléchargés avec métadonnées
+     */
+    public function downloadAllAttachments(int $emailNumber, string $destinationPath, bool $keepOriginalName = true): array
+    {
+        $this->ensureConnected();
+        
+        $email = $this->getEmail($emailNumber);
+        $attachments = $email['attachments'] ?? [];
+        
+        if (empty($attachments)) {
+            return [];
+        }
+        
+        // Créer le dossier si nécessaire
+        if (!is_dir($destinationPath)) {
+            mkdir($destinationPath, 0755, true);
+        }
+        
+        $downloaded = [];
+        
+        foreach ($attachments as $attachment) {
+            try {
+                $data = $this->downloadAttachment($emailNumber, $attachment['part_number']);
+                
+                // Déterminer le nom du fichier
+                $originalName = $attachment['filename'];
+                $extension = $this->getFileExtension($originalName, $attachment['type']);
+                
+                if ($keepOriginalName) {
+                    $filename = $this->sanitizeFilename($originalName);
+                } else {
+                    $filename = uniqid('attachment_') . '.' . $extension;
+                }
+                
+                // Éviter écrasement si fichier existe
+                $fullPath = $destinationPath . '/' . $filename;
+                $counter = 1;
+                while (file_exists($fullPath)) {
+                    $info = pathinfo($filename);
+                    $base = $info['filename'];
+                    $ext = $info['extension'] ?? '';
+                    $filename = $base . '_' . $counter . ($ext ? '.' . $ext : '');
+                    $fullPath = $destinationPath . '/' . $filename;
+                    $counter++;
+                }
+                
+                // Écrire le fichier
+                file_put_contents($fullPath, $data);
+                
+                $downloaded[] = [
+                    'original_name' => $originalName,
+                    'saved_name' => $filename,
+                    'path' => $fullPath,
+                    'size' => filesize($fullPath),
+                    'type' => $attachment['type'],
+                    'mime' => $this->getMimeType($fullPath, $attachment['type']),
+                    'extension' => $extension,
+                ];
+                
+            } catch (Exception $e) {
+                $downloaded[] = [
+                    'original_name' => $attachment['filename'] ?? 'unknown',
+                    'error' => $e->getMessage(),
+                ];
+            }
+        }
+        
+        return $downloaded;
+    }
+
+    /**
+     * Extraire le contenu propre d'un email (sans signature, réponses, etc.)
+     * 
+     * @param int $emailNumber
+     * @param bool $html Extraire le HTML (true) ou texte brut (false)
+     * @return array ['content' => contenu principal, 'signature' => signature détectée, 'quoted' => contenu cité]
+     */
+    public function extractCleanBody(int $emailNumber, bool $html = false): array
+    {
+        $email = $this->getEmail($emailNumber);
+        $body = $html ? ($email['body_html'] ?? $email['body_text']) : $email['body_text'];
+        
+        if (empty($body)) {
+            return ['content' => '', 'signature' => '', 'quoted' => ''];
+        }
+        
+        $content = $body;
+        $signature = '';
+        $quoted = '';
+        
+        // Supprimer le HTML si en mode texte
+        if (!$html && strpos($content, '<html') !== false) {
+            $content = strip_tags($content);
+        }
+        
+        // Détecter et extraire les réponses citées (quoted replies)
+        $quotedPatterns = [
+            '/^>.*$/m',                                    // Ligne commençant par >
+            '/^On .* wrote:.*$/ms',                        // "On ... wrote:"
+            '/^Le .* a écrit.*$/ms',                       // "Le ... a écrit"
+            '/^From:.*?Subject:.*$/ms',                    // Headers de forward
+            '/^De :.*?Objet :.*$/ms',                      // Headers français
+            '/_{3,}.*?From:.*$/ms',                        // Ligne de séparation + headers
+        ];
+        
+        foreach ($quotedPatterns as $pattern) {
+            if (preg_match($pattern, $content, $matches, PREG_OFFSET_CAPTURE)) {
+                $position = $matches[0][1];
+                $quoted = substr($content, $position);
+                $content = trim(substr($content, 0, $position));
+                break;
+            }
+        }
+        
+        // Détecter et extraire la signature
+        $signaturePatterns = [
+            '/\n-- ?\n.*/s',                               // Standard "-- " (RFC)
+            '/\n_{2,}\n.*/s',                             // Ligne de underscores
+            '/\n-{2,}\n.*/s',                             // Ligne de tirets
+            '/\nCordialement[,\s].*$/si',                // "Cordialement"
+            '/\nBest regards[,\s].*$/si',                // "Best regards"
+            '/\nSent from my .*/si',                      // "Sent from my iPhone"
+            '/\nEnvoyé depuis .*/si',                     // "Envoyé depuis mon iPhone"
+        ];
+        
+        foreach ($signaturePatterns as $pattern) {
+            if (preg_match($pattern, $content, $matches, PREG_OFFSET_CAPTURE)) {
+                $position = $matches[0][1];
+                $signature = trim(substr($content, $position));
+                $content = trim(substr($content, 0, $position));
+                break;
+            }
+        }
+        
+        // Nettoyer les espaces multiples et lignes vides excessives
+        $content = preg_replace('/\n{3,}/', "\n\n", $content);
+        $content = preg_replace('/[ \t]+/', ' ', $content);
+        
+        return [
+            'content' => trim($content),
+            'signature' => trim($signature),
+            'quoted' => trim($quoted),
+        ];
+    }
+
+    /**
+     * Obtenir l'extension d'un fichier avec détection automatique
+     */
+    private function getFileExtension(string $filename, string $mimeSubtype): string
+    {
+        // Essayer depuis le nom de fichier
+        if (preg_match('/\.([a-z0-9]{2,5})$/i', $filename, $matches)) {
+            return strtolower($matches[1]);
+        }
+        
+        // Mapper depuis le MIME type
+        $mimeMap = [
+            'JPEG' => 'jpg',
+            'JPG' => 'jpg',
+            'PNG' => 'png',
+            'GIF' => 'gif',
+            'PDF' => 'pdf',
+            'ZIP' => 'zip',
+            'RAR' => 'rar',
+            'DOC' => 'doc',
+            'DOCX' => 'docx',
+            'XLS' => 'xls',
+            'XLSX' => 'xlsx',
+            'PPT' => 'ppt',
+            'PPTX' => 'pptx',
+            'TXT' => 'txt',
+            'CSV' => 'csv',
+            'XML' => 'xml',
+            'HTML' => 'html',
+            'MP4' => 'mp4',
+            'AVI' => 'avi',
+            'MP3' => 'mp3',
+            'WAV' => 'wav',
+        ];
+        
+        $subtype = strtoupper($mimeSubtype);
+        return $mimeMap[$subtype] ?? strtolower($mimeSubtype);
+    }
+
+    /**
+     * Nettoyer un nom de fichier
+     */
+    private function sanitizeFilename(string $filename): string
+    {
+        // Supprimer caractères dangereux
+        $filename = preg_replace('/[^a-zA-Z0-9._-]/', '_', $filename);
+        $filename = preg_replace('/_+/', '_', $filename);
+        return trim($filename, '_');
+    }
+
+    /**
+     * Obtenir le MIME type d'un fichier
+     */
+    private function getMimeType(string $filePath, string $fallbackType = 'application/octet-stream'): string
+    {
+        if (!file_exists($filePath)) {
+            return $fallbackType;
+        }
+        
+        // Utiliser finfo si disponible
+        if (function_exists('finfo_open')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $mime = finfo_file($finfo, $filePath);
+            finfo_close($finfo);
+            return $mime ?: $fallbackType;
+        }
+        
+        // Fallback sur mime_content_type
+        if (function_exists('mime_content_type')) {
+            return mime_content_type($filePath) ?: $fallbackType;
+        }
+        
+        return $fallbackType;
+    }
+
+    /**
      * Marquer comme lu
      */
     public function markAsRead(int $emailNumber): bool

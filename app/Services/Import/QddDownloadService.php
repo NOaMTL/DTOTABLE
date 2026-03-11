@@ -4,41 +4,103 @@ namespace App\Services\Import;
 
 use Exception;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Log;
 
 class QddDownloadService
 {
     private array $downloadedFiles = [];
     private array $missingFiles = [];
+    private ?\QDDClient $qddClient = null;
+    private ?int $lastConnectionTime = null;
+    private int $maxConnectionDuration = 1500; // 25 minutes (5min de marge)
 
     /**
-     * Télécharger un fichier via QDD
+     * Obtenir ou créer une connexion QDD valide
+     */
+    private function getQddClient(): \QDDClient
+    {
+        $now = time();
+        
+        // Si pas de client OU si connexion > 25 minutes → reconnecter
+        if ($this->qddClient === null || 
+            ($this->lastConnectionTime !== null && ($now - $this->lastConnectionTime) > $this->maxConnectionDuration)) {
+            
+            if ($this->qddClient !== null) {
+                Log::info('QDD: Reconnexion préventive (session > 25min)');
+            }
+            
+            $this->qddClient = new \QDDClient();
+            $this->lastConnectionTime = $now;
+        }
+        
+        return $this->qddClient;
+    }
+
+    /**
+     * Télécharger un fichier via QDD avec gestion automatique de la reconnexion
      */
     public function downloadFile(string $fileName, string $fileType, string $remotePath, string $tempDir): ?string
     {
         $remoteFile = $remotePath ? rtrim($remotePath, '/') . '/' . $fileName : $fileName;
         $localFile = $tempDir . '/' . $fileName;
 
-        try {
-            $qdd = new \QDDClient();
-            $qdd->downloadToFile($remoteFile, $localFile);
-            
-            if (!file_exists($localFile)) {
-                throw new Exception("Le fichier n'a pas été téléchargé");
-            }
+        $maxRetries = 2;
+        $attempt = 0;
 
-            $this->downloadedFiles[] = $localFile;
-            
-            return $localFile;
-            
-        } catch (Exception $e) {
-            $this->missingFiles[] = [
-                'file' => $fileName,
-                'type' => $fileType,
-                'error' => $e->getMessage()
-            ];
-            
-            throw $e;
+        while ($attempt < $maxRetries) {
+            try {
+                $qdd = $this->getQddClient();
+                $qdd->downloadToFile($remoteFile, $localFile);
+                
+                if (!file_exists($localFile)) {
+                    throw new Exception("Le fichier n'a pas été téléchargé");
+                }
+
+                $this->downloadedFiles[] = $localFile;
+                
+                return $localFile;
+                
+            } catch (Exception $e) {
+                $attempt++;
+                $errorMessage = $e->getMessage();
+                $errorCode = method_exists($e, 'getCode') ? $e->getCode() : 0;
+                
+                // Si erreur 403 ou erreur d'autorisation → forcer reconnexion
+                if ($errorCode === 403 || 
+                    stripos($errorMessage, '403') !== false ||
+                    stripos($errorMessage, 'forbidden') !== false ||
+                    stripos($errorMessage, 'authorization') !== false ||
+                    stripos($errorMessage, 'authentication') !== false ||
+                    stripos($errorMessage, 'expired') !== false) {
+                    
+                    Log::warning("QDD: Erreur d'autorisation détectée (tentative $attempt/$maxRetries)", [
+                        'error' => $errorMessage,
+                        'code' => $errorCode,
+                        'file' => $fileName
+                    ]);
+                    
+                    // Forcer reconnexion
+                    $this->qddClient = null;
+                    $this->lastConnectionTime = null;
+                    
+                    if ($attempt < $maxRetries) {
+                        sleep(1); // Attendre 1 seconde avant retry
+                        continue;
+                    }
+                }
+                
+                // Autre erreur ou max retries atteint
+                $this->missingFiles[] = [
+                    'file' => $fileName,
+                    'type' => $fileType,
+                    'error' => $errorMessage
+                ];
+                
+                throw $e;
+            }
         }
+        
+        throw new Exception("Échec du téléchargement après $maxRetries tentatives");
     }
 
     /**

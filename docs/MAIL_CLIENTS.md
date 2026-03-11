@@ -2,7 +2,9 @@
 
 Système d'accès aux boîtes mail via IMAP ou POP3, **sans dépendances externes**, en PHP natif.
 
-**Compatible PHP 8.2 / 8.3**
+**✅ Utilisation STANDALONE (sans framework)**  
+**✅ Compatible PHP 8.2 / 8.3**  
+**✅ Aucune dépendance externe** (sauf extension `php-imap` pour ImapClient)
 
 ## 🚀 Installation
 
@@ -22,7 +24,71 @@ php -m | grep imap
 
 **Note** : POP3Client n'a besoin d'aucune extension (sockets natifs).
 
+## 🎯 Fonctionnalités Avancées
+
+### Extraction de Contenu Propre
+
+La méthode `extractCleanBody()` sépare automatiquement :
+- **Contenu principal** : Le vrai message de l'expéditeur
+- **Signature** : Détectée via patterns (Cordialement, Best regards, --, etc.)
+- **Contenu cité** : Réponses précédentes (lignes avec >, "On ... wrote:", etc.)
+
+```php
+$clean = $imap->extractCleanBody($emailId, false); // false = texte, true = HTML
+
+echo "Message principal:\n" . $clean['content'] . "\n\n";
+echo "Signature:\n" . $clean['signature'] . "\n\n";
+echo "Réponses citées:\n" . $clean['quoted'] . "\n";
+```
+
+**Patterns détectés :**
+- Signatures : `-- `, `___`, `---`, `Cordialement`, `Best regards`, `Sent from my iPhone`
+- Citations : `> texte`, `On ... wrote:`, `Le ... a écrit`, `From: ... Subject: ...`
+
+### Téléchargement Automatique des Pièces Jointes
+
+La méthode `downloadAllAttachments()` télécharge toutes les pièces jointes avec :
+- ✅ **Auto-détection du type de fichier** (MIME type + extension)
+- ✅ **Gestion des doublons** (renommage automatique si fichier existe)
+- ✅ **Nettoyage des noms** (suppression caractères dangereux)
+- ✅ **Métadonnées complètes** (taille, MIME, extension, chemin)
+
+```php
+$files = $imap->downloadAllAttachments(
+    emailNumber: 123,
+    destinationPath: __DIR__ . '/attachments',  // Sans Laravel
+    // destinationPath: storage_path('app/attachments'),  // Avec Laravel
+    keepOriginalName: true  // ou false pour noms uniques
+);
+
+foreach ($files as $file) {
+    if (isset($file['error'])) {
+        echo "Erreur: {$file['error']}\n";
+    } else {
+        echo "{$file['original_name']} → {$file['saved_name']}\n";
+        echo "Type: {$file['mime']} | Taille: {$file['size']} bytes\n";
+        echo "Chemin: {$file['path']}\n";
+    }
+}
+```
+
+**Types détectés automatiquement :**
+- Images : JPG, PNG, GIF
+- Documents : PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX
+- Archives : ZIP, RAR
+- Autres : TXT, CSV, XML, HTML, MP3, MP4, etc.
+
 ## 📖 Utilisation
+
+### Chargement de la Classe
+
+```php
+// Sans Laravel (standalone)
+require __DIR__ . '/app/Mail/ImapClient.php';
+
+// Avec Laravel (autoload)
+use App\Mail\ImapClient;
+```
 
 ### IMAP Client (Recommandé)
 

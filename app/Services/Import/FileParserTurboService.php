@@ -70,6 +70,7 @@ class FileParserTurboService
                     } elseif (isset($this->amountColumns[$columnName])) {
                         $data[$columnName] = $value ? $this->parseAmountFast($value) : 0;
                     } else {
+                        // Pas de trim ni conversion : performance maximale
                         $data[$columnName] = $value;
                     }
                     continue;
