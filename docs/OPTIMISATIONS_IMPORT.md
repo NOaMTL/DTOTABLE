@@ -76,7 +76,22 @@ La version TURBO désactive déjà la validation. Si vous utilisez v2 :
 
 ## 🔥 Configuration Optimale
 
-### Commande
+### Commande ULTRA-OPTIMISÉE (Recommandée)
+```bash
+php artisan tableau:import-turbo ClientCommercial \
+  --auto-optimize \
+  --truncate \
+  --chunk-size=2000
+```
+
+**`--auto-optimize` fait automatiquement :**
+1. ✅ Analyse la structure de la table (indexes, contraintes, clés étrangères)
+2. ✅ Sauvegarde tout en mémoire
+3. ✅ Supprime temporairement pour optimiser l'insert
+4. ✅ Import ultra-rapide sans overhead
+5. ✅ Restaure la structure exactement comme avant
+
+### Commande Alternative (Manuelle)
 ```bash
 php artisan tableau:import-turbo ClientCommercial \
   --drop-indexes \
@@ -107,7 +122,8 @@ max_execution_time = 3600
 | + Logs désactivés | 40% | 23 min |
 | + Version TURBO | 40% | 14 min |
 | + Chunk 2000 | 25% | 10 min |
-| + SQL Server optimisé | 50% | **5 min** |
+| + **--auto-optimize** | 60% | **4 min** |
+| + SQL Server optimisé | 30% | **3 min** |
 
 ## ⚡ Commande Ultra-Optimisée
 
