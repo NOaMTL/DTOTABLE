@@ -106,4 +106,56 @@ return [
     |
     */
     'auto_cleanup' => env('IMPORT_AUTO_CLEANUP', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | SQL Server - Configuration BULK INSERT
+    |--------------------------------------------------------------------------
+    |
+    | Si votre serveur SQL Server est distant (pas sur la même machine que
+    | l'application Laravel), vous devez configurer un chemin réseau partagé
+    | accessible par SQL Server pour utiliser BULK INSERT.
+    |
+    | Exemples:
+    |   - Chemin UNC: '\\\\SERVEUR\\partage\\imports'
+    |   - Chemin local SQL Server: 'C:\\temp\\imports'
+    |
+    | Si null ou non configuré:
+    |   - SQL Server local: utilisera le chemin local
+    |   - SQL Server distant: utilisera INSERT + TABLOCK (plus lent mais fonctionne)
+    |
+    */
+    'sql_server' => [
+        'bulk_insert_path' => env('SQL_SERVER_BULK_PATH', null),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Types d'import - Configuration avancée
+    |--------------------------------------------------------------------------
+    |
+    | Configuration spécifique pour chaque type d'import
+    |
+    */
+    'types' => [
+        'ClientCommercial' => [
+            'table' => 'client_commercial_data',
+            
+            // Colonnes calculées/forcées (complément au parsing)
+            'computed_columns' => [
+                // Exemples de colonnes calculées
+                // 'channel' => 'web',
+                // 'campaign' => fn($row) => 'IMPORT_2026',
+                // 'priority' => fn($row) => $row['type_client'] === 'VIP' ? 1 : 5,
+                // 'full_name' => fn($row) => trim(($row['prenom'] ?? '') . ' ' . ($row['nom'] ?? '')),
+            ],
+        ],
+        
+        'Partenaire' => [
+            'table' => 'partenaire_data',
+            'computed_columns' => [
+                // Colonnes spécifiques aux partenaires
+            ],
+        ],
+    ],
 ];

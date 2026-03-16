@@ -362,13 +362,24 @@ class ImportTableauDataExperimentalCommand extends Command
             return;
         }
 
+        // Convertir en chemin accessible par SQL Server (si distant)
+        $sqlServerPath = $this->convertToSqlServerPath($bulkFile);
+        
+        if (!$sqlServerPath) {
+            $this->warn("  ⚠️ SQL Server distant : BULK INSERT non disponible");
+            $this->warn("  ⚠️ Fallback sur INSERT + TABLOCK...");
+            @unlink($bulkFile);
+            $this->processWithClassicInsert($filePath, $fileName, $fileType, $tableName, $columnMapping, $importType, $useTablock);
+            return;
+        }
+
         // Construire la commande BULK INSERT
         $tablock = $useTablock ? ', TABLOCK' : '';
         
         try {
             DB::statement("
                 BULK INSERT {$tableName}
-                FROM '{$bulkFile}'
+                FROM '{$sqlServerPath}'
                 WITH (
                     DATAFILETYPE = 'char',
                     FIELDTERMINATOR = '\t',
@@ -391,7 +402,14 @@ class ImportTableauDataExperimentalCommand extends Command
             
         } catch (Exception $e) {
             $this->error("  ❌ BULK INSERT échoué: {$e->getMessage()}");
-            $this->warn("  ⚠️ Fallback sur INSERT classique...");
+            
+            // Détecter si c'est un problème d'accès fichier
+            if (str_contains($e->getMessage(), 'Cannot bulk load') || 
+                str_contains($e->getMessage(), 'Operating system error code')) {
+                $this->warn("  ⚠️ SQL Server ne peut pas accéder au fichier (serveur distant?)");
+            }
+            
+            $this->warn("  ⚠️ Fallback sur INSERT + TABLOCK...");
             $this->processWithClassicInsert($filePath, $fileName, $fileType, $tableName, $columnMapping, $importType, $useTablock);
         } finally {
             @unlink($bulkFile);
@@ -617,6 +635,40 @@ class ImportTableauDataExperimentalCommand extends Command
         $bytes /= pow(1024, $pow);
         
         return round($bytes, 2) . ' ' . $units[$pow];
+    }
+
+    /**
+     * 🔧 Convertir chemin local en chemin accessible par SQL Server
+     */
+    private function convertToSqlServerPath(string $localPath): ?string
+    {
+        // Configuration du chemin partagé accessible par SQL Server
+        $sharedPath = config('imports.sql_server.bulk_insert_path', null);
+        
+        if (!$sharedPath) {
+            // Pas de chemin partagé configuré
+            // Si SQL Server est local (localhost, 127.0.0.1, ou nom machine), on peut utiliser le chemin local
+            $host = config('database.connections.sqlsrv.host', 'localhost');
+            
+            if (in_array($host, ['localhost', '127.0.0.1', '(local)', '.'])) {
+                // SQL Server local : utiliser le chemin Windows natif
+                return str_replace('/', '\\', $localPath);
+            }
+            
+            // SQL Server distant sans chemin partagé : impossible d'utiliser BULK INSERT
+            return null;
+        }
+        
+        // Copier le fichier vers le chemin partagé
+        $fileName = basename($localPath);
+        $sharedFile = rtrim($sharedPath, '\\/') . DIRECTORY_SEPARATOR . $fileName;
+        
+        if (!copy($localPath, $sharedFile)) {
+            return null;
+        }
+        
+        // Retourner le chemin UNC ou local accessible par SQL Server
+        return str_replace('/', '\\', $sharedFile);
     }
 
     // Méthodes de gestion de structure (identiques à ImportTableauDataTurboCommand)

@@ -15,7 +15,15 @@
         "vite": "^7.0.7"
     },
     "dependencies": {
+        "@inertiajs/vue3": "^2.3.18",
+        "@primeuix/themes": "^2.0.3",
+        "@primevue/themes": "^4.5.4",
+        "@vitejs/plugin-vue": "^6.0.5",
         "ag-grid-community": "^35.1.0",
-        "ag-grid-vue3": "^35.1.0"
+        "ag-grid-vue3": "^35.1.0",
+        "lodash": "^4.17.23",
+        "primeicons": "^7.0.0",
+        "primevue": "^4.5.4",
+        "vue": "^3.5.30"
     }
 }
